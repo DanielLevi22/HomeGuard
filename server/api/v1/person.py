@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,Form,UploadFile,File
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -9,8 +9,27 @@ import crud.person as crud
 router = APIRouter(prefix="/Persons", tags=["Persons"])
 
 @router.post("/", response_model=Person)
-def create_Person(Person: PersonCreate, db: Session = Depends(get_db)):
-    return crud.create_Person(db, Person)
+async def create_person_endpoint(
+    name: str = Form(...),
+    allowed: bool = Form(...),
+    notes: str = Form(""),
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    # Ler bytes da imagem
+    image_bytes = await image.read()
+
+    # Criar objeto para CRUD
+    person_create = PersonCreate(
+        name=name,
+        allowed=allowed,
+        notes=notes,
+        image_data=image_bytes
+    )
+
+    # Criar no banco
+    db_person = crud.create_person(db, person_create)
+    return db_person
 
 @router.get("/", response_model=List[Person])
 def list_Persons(db: Session = Depends(get_db)):
