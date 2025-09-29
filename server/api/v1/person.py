@@ -55,3 +55,10 @@ def delete_Person(Person_id: int, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Pessoa não encontrada")
     return {"ok": True}
+
+
+check_router = APIRouter(prefix="/check", tags=["Check"])
+
+@check_router.post("/")
+def check_person(file: UploadFile, db: Session = Depends(get_db)):
+    return crud.classify_person(file, db)

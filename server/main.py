@@ -7,6 +7,7 @@ app = FastAPI(title="HomeGuard", description="Sistema de reconhecimento facial e
 
 
 app.include_router(person.router)
+app.include_router(person.check_router)
 
 
 
