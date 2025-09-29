@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException,Form,UploadFile,File
+from models.person import PersonImage
 from sqlalchemy.orm import Session
 from typing import List
 
 from core.database import get_db
-from schemas.person import Person, PersonCreate
+from schemas.person import Person, PersonCreate, PersonImageSchema
 import crud.person as crud
 
 router = APIRouter(prefix="/Persons", tags=["Persons"])
@@ -12,24 +13,15 @@ router = APIRouter(prefix="/Persons", tags=["Persons"])
 async def create_person_endpoint(
     name: str = Form(...),
     allowed: bool = Form(...),
-    notes: str = Form(""),
-    image: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    # Ler bytes da imagem
-    image_bytes = await image.read()
-
-    # Criar objeto para CRUD
     person_create = PersonCreate(
         name=name,
         allowed=allowed,
-        notes=notes,
-        image_data=image_bytes
     )
-
-    # Criar no banco
     db_person = crud.create_person(db, person_create)
     return db_person
+
 
 @router.get("/", response_model=List[Person])
 def list_Persons(db: Session = Depends(get_db)):
@@ -56,9 +48,25 @@ def delete_Person(Person_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Pessoa não encontrada")
     return {"ok": True}
 
+@router.post("/{person_id}/images", response_model=PersonImageSchema)
+async def add_person_image_endpoint(
+    person_id: int,
+    image: UploadFile = File(...),
+    test_mode: bool = Form(True),
+    db: Session = Depends(get_db)
+):
+    image_bytes = await image.read()
+    db_image = crud.add_person_image(db, person_id, image_bytes, test_mode=test_mode)
+    return db_image
 
+
+    
 check_router = APIRouter(prefix="/check", tags=["Check"])
 
 @check_router.post("/")
-def check_person(file: UploadFile, db: Session = Depends(get_db)):
-    return crud.classify_person(file, db)
+def check_person(
+    file: UploadFile,
+    test_mode: bool = Form(True),  
+    db: Session = Depends(get_db)
+):
+    return crud.classify_person(file, db, test_mode=test_mode)

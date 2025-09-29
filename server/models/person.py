@@ -10,20 +10,19 @@ class Person(Base):
     name = Column(String, index=True)
     allowed = Column(Boolean, default=True)
     notes = Column(String, nullable=True)
-    embedding = Column(JSON, nullable=True)  # Armazena embedding atual (lista de 512 floats)
-    timestamp = Column(DateTime, default=datetime.now, nullable=False)  # Data de cadastro/atualização
-    # camera_id = Column(String, nullable=True)  # ID da câmera (ex: "cam1")
+    timestamp = Column(DateTime, default=datetime.now, nullable=False)
 
-    # # Relacionamento com tabela de histórico de embeddings
-    # embedding_history = relationship("PersonEmbeddingHistory", back_populates="person")
+    # Relacionamento 1:N → uma pessoa pode ter vários embeddings
+    images = relationship("PersonImage", back_populates="person", cascade="all, delete-orphan")
 
-# class PersonEmbeddingHistory(Base):
-#     __tablename__ = "person_embedding_history"
 
-#     id = Column(Integer, primary_key=True, index=True)
-#     person_id = Column(Integer, ForeignKey("persons.id"), nullable=False)
-#     embedding = Column(JSON, nullable=False)  # Embedding antigo
-#     timestamp = Column(DateTime, default=datetime.now, nullable=False)  # Data do embedding
+class PersonImage(Base):
+    __tablename__ = "person_images"
 
-#     # Relacionamento inverso
-#     person = relationship("Person", back_populates="embedding_history")
+    id = Column(Integer, primary_key=True, index=True)
+    person_id = Column(Integer, ForeignKey("persons.id"), nullable=False)
+    image_base64 = Column(String, nullable=False)  # imagem salva em base64
+    embedding = Column(JSON, nullable=False)       # lista de floats
+    timestamp = Column(DateTime, default=datetime.now, nullable=False)
+
+    person = relationship("Person", back_populates="images")

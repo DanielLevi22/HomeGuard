@@ -9,7 +9,8 @@ from schemas.person import PersonCreate
 from huggingface_hub import hf_hub_download
 import onnxruntime as ort
 from fastapi import HTTPException
-
+import base64
+from models.person import PersonImage
 # -----------------------------
 # Carregar modelo YOLOv8
 # -----------------------------
@@ -61,38 +62,16 @@ def check_antispoof(img, threshold: float = 0.5):
 # -----------------------------
 # CRUD e funções principais
 # -----------------------------
-def create_person(db: Session, person: PersonCreate):
-    nparr = np.frombuffer(person.image_data, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-    # Anti-spoofing
-    if check_antispoof(img) == 0:
-        raise HTTPException(status_code=400, detail="Spoofing detectado!")
-
-    # Detecção com YOLOv8
-    results = yolo_model(img)
-    if not results[0].boxes:
-        raise ValueError("Nenhum rosto detectado na imagem.")
-
-    # InsightFace embeddings
-    faces = face_app.get(img)
-    if not faces:
-        raise ValueError("Nenhum rosto detectado para embedding.")
-    embedding = faces[0].embedding
-
+def create_person(db: Session, person: PersonCreate) -> PersonModel:
     db_person = PersonModel(
         name=person.name,
         allowed=person.allowed,
-        notes=person.notes,
-        embedding=embedding.tolist(),
         timestamp=datetime.now()
     )
     db.add(db_person)
     db.commit()
     db.refresh(db_person)
     return db_person
-
-
 def get_Persons(db: Session):
     return db.query(PersonModel).all()
 
@@ -120,59 +99,105 @@ def update_Person(db: Session, Person_id: int, updates: dict):
     db.refresh(Person)
     return Person
 
+def create_person(db: Session, person: PersonCreate) -> PersonModel:
+    db_person = PersonModel(
+        name=person.name,
+        allowed=person.allowed,
+        timestamp=datetime.now()
+    )
+    db.add(db_person)
+    db.commit()
+    db.refresh(db_person)
+    return db_person
+
+
+def add_person_image(db: Session, person_id: int, image_bytes: bytes, test_mode: bool = False) -> PersonImage:
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    # Anti-spoofing
+    if not test_mode and check_antispoof(img) == 0:
+        raise HTTPException(status_code=400, detail="Spoofing detectado!")
+
+    # YOLO
+    results = yolo_model(img)
+    if not results[0].boxes:
+        raise HTTPException(status_code=400, detail="Nenhum rosto detectado na imagem.")
+
+    # Embedding InsightFace
+    faces = face_app.get(img)
+    if not faces:
+        raise HTTPException(status_code=400, detail="Nenhum rosto detectado para embedding.")
+    embedding = faces[0].embedding
+
+    # Converter imagem em base64
+    _, buffer = cv2.imencode(".jpg", img)
+    image_base64 = base64.b64encode(buffer).decode("utf-8")
+
+    # Registrar no banco
+    db_image = PersonImage(
+        person_id=person_id,
+        image_base64=image_base64,
+        embedding=embedding.tolist(),
+        timestamp=datetime.now()
+    )
+    db.add(db_image)
+    db.commit()
+    db.refresh(db_image)
+
+    return db_image
 
 # -----------------------------
 # Classificação de pessoa
 # -----------------------------
-def classify_person(file, db):
+def classify_person(file, db, test_mode=False):
+    import base64
+    import numpy as np
+    import cv2
+    from fastapi import HTTPException
+    from models.person import PersonImage
+
     img_bytes = file.file.read()
     nparr = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    print("[DEBUG] Imagem carregada:", img.shape if img is not None else "Erro")
-
-    # Anti-spoofing
-    spoof_check = check_antispoof(img)
-    print(f"[DEBUG] Resultado anti-spoof: {spoof_check}")
-    if spoof_check == 0:
-        raise HTTPException(status_code=400, detail="Spoofing detectado!")
+    # Anti-spoofing (ignorado se estiver em modo teste)
+    if not test_mode:
+        if check_antispoof(img) == 0:
+            raise HTTPException(status_code=400, detail="Spoofing detectado!")
 
     # Detecção de rosto
     results = yolo_model(img)
-    print(f"[DEBUG] YOLOv8 detectou {len(results[0].boxes)} rostos")
     if not results[0].boxes:
         raise HTTPException(status_code=400, detail="Nenhum rosto detectado!")
 
     # InsightFace embeddings
     faces = face_app.get(img)
-    print(f"[DEBUG] InsightFace detectou {len(faces)} rostos")
     if not faces:
         raise HTTPException(status_code=400, detail="Nenhum rosto detectado para embedding!")
 
     embedding = faces[0].embedding
 
-    # Comparar com embeddings existentes
-    existing_people = get_all_person_embeddings(db)
-    print(f"[DEBUG] Banco contém {len(existing_people)} pessoas")
+    # Comparar com embeddings existentes (tabela PersonImage)
+    from numpy import dot
+    from numpy.linalg import norm
 
     def cosine_similarity(a, b):
-        from numpy import dot
-        from numpy.linalg import norm
         return dot(a, b) / (norm(a) * norm(b))
 
-    for person in existing_people:
-        sim = cosine_similarity(embedding, np.array(person['embedding']))
-        print(f"[DEBUG] Comparando com {person['name']} -> sim={sim:.4f}")
+    # Buscar todas as imagens com embeddings
+    images = db.query(PersonImage).all()
+    for img_record in images:
+        sim = cosine_similarity(embedding, np.array(img_record.embedding))
         if sim > 0.7:
             return {
                 "recognized": True,
-                "name": person['name'],
-                "allowed": person['allowed'],
+                "name": img_record.person.name,
+                "allowed": img_record.person.allowed,
                 "similarity": sim
             }
 
     return {"recognized": False}
-
 
 
 def get_all_person_embeddings(db: Session):
